@@ -47,10 +47,21 @@ start:
     mov ds, ax
     mov es, ax
 
+    ; ---- catch CPU exceptions before anything else ----
+    call install_exceptions
+
     ; ---- everything that needs the BIOS, before unreal mode ----
     call detect_memory
     call gfx_load_font
-    call pci_find_vga
+    call gfx_probe
+    jnc .gfx_ok
+    mov ax, [gfx_probe_error]
+    test ax, ax
+    jnz .gfx_error
+    mov ax, ERR_NO_VBE
+.gfx_error:
+    jmp gsod
+.gfx_ok:
 
     call gfx_enter_unreal
 
@@ -58,6 +69,10 @@ start:
     mov ax, 1280
     mov bx, 720
     call gfx_set_mode
+    jnc .mode_ok
+    mov ax, ERR_VBE_MODE
+    jmp gsod
+.mode_ok:
 
     ; ---- serial link for the QEMU window-size helper ----
     call serial_init
@@ -66,16 +81,28 @@ start:
 
     ; ---- interrupt controllers, timer, keyboard, mouse ----
     call irq_remap
+
+    ; vectors 8..15 are safe now that the PIC moved to 0x20..0x2F
+    mov si, ex_stub_table + 8 * 2
+    mov di, 8 * 4
+    mov cx, 8
+    call install_exception_vectors
+
     call kbd_init
     call mouse_init
+    jnc .mouse_ok
+    mov ax, ERR_MOUSE_INIT
+    jmp gsod
+.mouse_ok:
     call irq_enable
     call kbd_flush
-    sti
 
-    ; ---- desktop subsystems ----
+    ; ---- desktop subsystems (interrupts stay off during init) ----
     call term_init
     call rtc_update
     call ui_init
+
+    sti
 
     ; first complete frame
     call ui_compose
@@ -102,6 +129,9 @@ main_loop:
     jnc .no_rtc
     mov byte [scene_dirty], 1
 .no_rtc:
+
+    ; resolution preview countdown (10 s rollback)
+    call settings_tick
 
     ; terminal cursor blink (~0.64 s)
     mov eax, [tick_count]
@@ -221,6 +251,12 @@ detect_memory:
 ;  cursor compositing (restore the old area from the back buffer)
 ; ============================================================
 update_cursor_visual:
+    cli
+    mov ax, [mouse_x]
+    mov bx, [mouse_y]
+    mov [cursor_new_x], ax
+    mov [cursor_new_y], bx
+    sti
     cmp byte [cursor_drawn], 0
     je .draw
     mov ax, [cursor_old_x]
@@ -232,9 +268,9 @@ update_cursor_visual:
     call copy_buffer_rect
 .draw:
     call draw_cursor
-    mov ax, [mouse_x]
+    mov ax, [cursor_new_x]
     mov [cursor_old_x], ax
-    mov ax, [mouse_y]
+    mov ax, [cursor_new_y]
     mov [cursor_old_y], ax
     mov byte [cursor_drawn], 1
     ret
@@ -278,6 +314,8 @@ need_cursor     db 1
 cursor_drawn    db 0
 cursor_old_x    dw 160
 cursor_old_y    dw 90
+cursor_new_x    dw 160
+cursor_new_y    dw 90
 rtc_tick        dd 0
 mem_conv_kb     dw 640
 mem_ext_kb      dw 0
@@ -296,3 +334,5 @@ null_idt        dw 0
 %include "kernel/term.inc"
 %include "kernel/settings.inc"
 %include "kernel/ui.inc"
+%include "include/errors.inc"
+%include "kernel/gsod.inc"

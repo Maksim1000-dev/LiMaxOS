@@ -49,6 +49,9 @@ mouse_init:
     je .enabled
     call kbd_flush
     loop .enable_retry
+    stc
+    jmp .done
+
 .enabled:
     call kbd_flush
 
@@ -63,7 +66,9 @@ mouse_init:
     mov byte [mouse_moved], 0
     mov byte [mouse_pressed], 0
     mov byte [mouse_released], 0
+    clc
 
+.done:
     popa
     ret
 

@@ -86,11 +86,6 @@ loaded:
     mov ah, 0x0A
     call print_at
 
-    mov si, msg_go
-    mov di, 12 * 160 + 22 * 2
-    mov ah, 0x07
-    call print_at
-
     mov dl, [boot_drive]
     push word 0x1000
     push word 0x0020
@@ -147,23 +142,57 @@ read_one:
     clc
     ret
 
+; ------------------------------------------------------------
+; disk_error / bad_image: green screen of death, then halt
+; ------------------------------------------------------------
 disk_error:
-    mov ax, 0xB800
-    mov es, ax
-    mov si, msg_disk
-    mov di, 14 * 160 + 22 * 2
-    mov ah, 0x0C
-    call print_at
-    jmp halt
+    mov ax, ERR_BOOT_DISK
+    jmp gsod
 
 bad_image:
+    mov ax, ERR_LOADER_IMAGE
+
+; AX = error code (100 or 101), never returns
+gsod:
+    cli
+    push ax
+
+    ; green background, white text
     mov ax, 0xB800
     mov es, ax
-    mov si, msg_bad
-    mov di, 14 * 160 + 16 * 2
-    mov ah, 0x0C
+    xor di, di
+    mov ax, 0x2F20
+    mov cx, 2000
+    rep stosw
+
+    pop ax
+    push ax
+
+    ; sad face + title
+    mov si, gsod_face
+    mov di, 2 * 160 + 6 * 2
+    mov ah, 0x2F
     call print_at
-    jmp halt
+
+    ; CODE OF ERROR: <code> <name>
+    mov si, gsod_pre
+    mov di, 4 * 160 + 6 * 2
+    call print_at
+
+    pop ax
+    cmp ax, ERR_LOADER_IMAGE
+    je .loader
+    mov si, gsod_n100
+    jmp .name
+.loader:
+    mov si, gsod_n101
+.name:
+    call print_at
+
+    ; SYSTEM HALTED
+    mov si, gsod_halt
+    mov di, 6 * 160 + 6 * 2
+    call print_at
 
 halt:
     cli
@@ -185,9 +214,15 @@ remaining   dw 0
 msg_title   db "LiMaxOS Bootloader v1.0", 0
 msg_loading db "Loading LMAXLDR.SYS ...", 0
 msg_ok      db "OK", 0
-msg_go      db "Starting boot manager...", 0
-msg_disk    db "Disk read error! System halted.", 0
-msg_bad     db "Invalid LMAXLDR.SYS image! System halted.", 0
+
+gsod_face   db ":( SOMETING WENT WRONG", 0
+gsod_halt   db "SYSTEM HALTED", 0
+gsod_pre    db "CODE OF ERROR: ", 0
+gsod_n100   db "100 DISK READ ERROR", 0
+gsod_n101   db "101 BAD LOADER", 0
+
+%define GSOD_CODES_ONLY
+%include "include/errors.inc"
 
     times 510 - ($ - $$) db 0
     dw 0xAA55

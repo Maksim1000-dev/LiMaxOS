@@ -945,14 +945,14 @@ ui_update_hover:
     mov byte [scene_dirty], 1
 
 .settings:
-    mov byte [se_hover], 0xFF
-    mov byte [set_hover], 0xFF
     mov bx, windows + WIN_SET * W_SIZE
     mov al, [bx + W_STATE]
     cmp al, 1
     je .settings_visible
     cmp al, 3
-    jne .settings_done
+    je .settings_visible
+    mov al, SE_HIT_NONE
+    jmp .settings_store
 .settings_visible:
     call ui_geometry_win
     mov ax, [mouse_x]
@@ -966,7 +966,7 @@ ui_update_hover:
     mov di, [cur_h]
     sub di, 15
     call ui_point_in_rect
-    jnc .settings_done
+    jnc .settings_none
     mov ax, [mouse_x]
     sub ax, [cur_x]
     sub ax, 2
@@ -974,7 +974,10 @@ ui_update_hover:
     sub bx, [cur_y]
     sub bx, 13
     call settings_hover_at
-    mov [se_hover], al
+    jmp .settings_store
+.settings_none:
+    mov al, SE_HIT_NONE
+.settings_store:
     cmp al, [set_hover]
     je .settings_done
     mov [set_hover], al
@@ -1214,8 +1217,42 @@ ui_clamp_one:
     mov dx, TERM_MIN_H
     jmp .clamp
 .settings_min:
-    mov ax, SET_MIN_W
-    mov dx, SET_MIN_H
+    ; Settings keeps its preferred size on every mode change; a small
+    ; preview mode must not permanently shrink the window.
+    mov ax, 380
+    mov dx, 280
+    mov cx, [UI_W]
+    cmp ax, cx
+    jbe .sw_ok
+    mov ax, cx
+.sw_ok:
+    mov cx, [taskbar_y]
+    cmp dx, cx
+    jbe .sh_ok
+    mov dx, cx
+.sh_ok:
+    mov [bx + W_W], ax
+    mov [bx + W_H], dx
+    mov [bx + W_SW], ax
+    mov [bx + W_SH], dx
+
+    ; center it again for the new desktop size
+    mov cx, [UI_W]
+    sub cx, ax
+    shr cx, 1
+    jns .sx_ok
+    xor cx, cx
+.sx_ok:
+    mov [bx + W_X], cx
+    mov [bx + W_SX], cx
+    mov cx, [taskbar_y]
+    sub cx, dx
+    shr cx, 1
+    jns .sy_ok
+    xor cx, cx
+.sy_ok:
+    mov [bx + W_Y], cx
+    mov [bx + W_SY], cx
 
 .clamp:
     push bx
@@ -1509,6 +1546,10 @@ ui_click_window:
     ret
 
 .close:
+    cmp byte [cw_idx], WIN_SET
+    jne .close_hide
+    call settings_cancel_preview
+.close_hide:
     mov bx, [cw_ptr]
     mov byte [bx + W_STATE], 0
     mov byte [dragging], 0
@@ -1520,6 +1561,10 @@ ui_click_window:
     ret
 
 .minimize:
+    cmp byte [cw_idx], WIN_SET
+    jne .minimize_hide
+    call settings_cancel_preview
+.minimize_hide:
     mov bx, [cw_ptr]
     mov byte [bx + W_STATE], 2
     mov byte [dragging], 0
@@ -1685,6 +1730,46 @@ ui_key:
     ret
 
 .no_menu:
+    ; Settings shortcuts take priority while it is focused
+    cmp byte [z_top], WIN_SET
+    jne .term_key
+    mov bx, windows + WIN_SET * W_SIZE
+    mov cl, [bx + W_STATE]
+    cmp cl, 1
+    je .settings_key
+    cmp cl, 3
+    jne .term_key
+.settings_key:
+    cmp al, 27
+    je .settings_esc
+    cmp al, 13
+    je .settings_enter
+    cmp al, 0x80
+    je .settings_up
+    cmp al, 0x81
+    je .settings_down
+    jmp .consumed
+
+.settings_esc:
+    call settings_cancel_preview
+    stc
+    ret
+.settings_enter:
+    call settings_commit_preview
+    stc
+    ret
+.settings_up:
+    mov al, 0xFF
+    call settings_move_sel
+    stc
+    ret
+.settings_down:
+    mov al, 1
+    call settings_move_sel
+    stc
+    ret
+
+.term_key:
     cmp al, 27
     je .consumed
     cmp byte [z_top], WIN_TERM
@@ -1713,7 +1798,7 @@ ui_key:
 windows:
     ; state, x, y, w, h, saved x, y, w, h, page
     dw 1,  80,  12, 272, 140,  80,  12, 272, 140, 0
-    dw 0,  16,   5, 288, 150,  16,   5, 288, 150, 0
+    dw 0,  16,   5, 380, 280,  16,   5, 380, 280, 0
 
 z_top           db WIN_TERM
 menu_open       db 0
@@ -1723,7 +1808,6 @@ l_hover         db 0
 task_hover      db 0xFF
 task_hover_old  db 0xFF
 set_hover       db 0xFF
-se_hover        db 0
 ui_selected     db 0
 ui_band         dw 0
 ui_band_h       dw 0

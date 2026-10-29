@@ -495,32 +495,9 @@ set_stage:
 show_detail:
     ret
 
-; panic: SI = message, marks current stage failed and halts
+; panic: AX = error code, shows the green screen of death
 panic:
-    push si
-    mov al, 20
-    mov ah, 4
-    call goto_xy
-    mov al, 0x0C
-    call set_attr
-    mov cx, 72
-    call print_spaces
-    mov al, 20
-    mov ah, 4
-    call goto_xy
-    pop si
-    call puts
-    mov al, 21
-    mov ah, 4
-    call goto_xy
-    mov al, 0x0C
-    call set_attr
-    mov si, msg_halted
-    call puts
-.hang:
-    cli
-    hlt
-    jmp .hang
+    jmp gsod
 
 ; ============================================================
 ;  hardware detection
@@ -568,7 +545,7 @@ load_kernel:
     cmp ax, 1
     jb .bad_image
     cmp ax, 127
-    ja .bad_image
+    ja .too_large
     mov ax, [kern_size]
     cmp ax, KERNEL_ENTRY
     jbe .bad_image
@@ -612,13 +589,19 @@ load_kernel:
     mov al, 2
     mov dl, 3
     call set_stage
-    mov si, msg_disk_fail
+    mov ax, ERR_KERNEL_READ
     jmp panic
 .bad_image:
     mov al, 2
     mov dl, 3
     call set_stage
-    mov si, msg_bad_kernel
+    mov ax, ERR_KERNEL_HEADER
+    jmp panic
+.too_large:
+    mov al, 2
+    mov dl, 3
+    call set_stage
+    mov ax, ERR_KERNEL_LARGE
     jmp panic
 
 update_load_progress:
@@ -680,7 +663,7 @@ verify_kernel:
     mov al, 3
     mov dl, 3
     call set_stage
-    mov si, msg_checksum_fail
+    mov ax, ERR_CHECKSUM
     jmp panic
 
 ; ============================================================
@@ -749,7 +732,7 @@ memory_test:
     mov al, 4
     mov dl, 3
     call set_stage
-    mov si, msg_mem_fail
+    mov ax, ERR_MEMORY_TEST
     jmp panic
 
 show_mem_detail:
@@ -922,4 +905,10 @@ logo2           db "#.... ..#.. ##.## #...# .#.#. #...# #....", 0
 logo3           db "#.... ..#.. #.#.# ##### ..#.. #...# .###.", 0
 logo4           db "#.... ..#.. #...# #...# .#.#. #...# ....#", 0
 logo5           db "##### .###. #...# .###. #...# .###. ####.", 0
+
+; ============================================================
+;  shared error catalog + green screen of death
+; ============================================================
+%include "include/errors.inc"
+%include "boot/gsod.inc"
 

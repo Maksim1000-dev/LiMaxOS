@@ -272,6 +272,18 @@ term_execute:
     je .echo
 .not_echo_cmd:
 
+    ; GSOD [code] accepts an optional decimal code
+    cmp word [term_cmd], 'GS'
+    jne .not_gsod_cmd
+    cmp word [term_cmd + 2], 'OD'
+    jne .not_gsod_cmd
+    mov al, [term_cmd + 4]
+    test al, al
+    jz .gsod
+    cmp al, ' '
+    je .gsod
+.not_gsod_cmd:
+
     mov si, term_cmd
     mov di, term_cmd_help
     call term_streq
@@ -432,6 +444,39 @@ term_execute:
 .power_halt:
     hlt
     jmp .power_halt
+.gsod:
+    ; default demo code
+    xor bx, bx
+    mov si, term_cmd + 4
+.gsod_skip:
+    cmp byte [si], ' '
+    jne .gsod_parse
+    inc si
+    jmp .gsod_skip
+.gsod_parse:
+    mov al, [si]
+    cmp al, '0'
+    jb .gsod_ready
+    cmp al, '9'
+    ja .gsod_ready
+    sub al, '0'
+    xor ah, ah
+    push ax
+    mov ax, bx
+    mov cx, 10
+    mul cx
+    mov bx, ax
+    pop ax
+    add bx, ax
+    inc si
+    jmp .gsod_parse
+.gsod_ready:
+    test bx, bx
+    jnz .gsod_launch
+    mov bx, ERR_CHECKSUM
+.gsod_launch:
+    mov ax, bx
+    jmp gsod
 .exit:
     mov bx, windows + WIN_TERM * W_SIZE
     mov byte [bx + W_STATE], 0
@@ -669,7 +714,7 @@ term_help_text:
     db "Commands:", 13, 10
     db "HELP VER DIR CLS ECHO MEM MODE", 13, 10
     db "TIME DATE ABOUT SETTINGS EXIT", 13, 10
-    db "REBOOT POWEROFF HALT", 13, 10, 0
+    db "GSOD [code] REBOOT POWEROFF HALT", 13, 10, 0
 
 term_ver_text:
     db "LiMaxOS 1.1 GUI edition", 13, 10

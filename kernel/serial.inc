@@ -33,6 +33,10 @@ serial_init:
     mov al, 0x03
     out dx, al              ; DTR + RTS
 
+    mov dx, 0x3F9
+    xor al, al
+    out dx, al              ; IER = 0 again (no UART IRQs, ever)
+
     mov word [serial_len], 0
     mov byte [helper_seen], 0
     popa
